@@ -6,7 +6,9 @@
 - M0 project skeleton is implemented.
 - M1 RHI + frame loop + swapchain clear code is implemented.
 - The renderer currently targets Windows, VS 2022 Community, MSVC x64, Vulkan SDK, GLFW, and Dear ImGui.
-- GitHub sync is blocked until `gh auth login` is completed.
+- GitHub sync is active at `https://github.com/BlackJoke76/ZLRenderer`.
+- `main` contains the bootstrap root commit.
+- `codex/bootstrap-renderer-contract` is pushed and tracks origin.
 
 ## Last Completed
 
@@ -20,7 +22,7 @@
 
 ## Next Step
 
-1. After `gh auth login`, create the public GitHub repository and push.
+1. Open the bootstrap draft PR.
 2. Start M2: move the clear pass behind Render Graph.
 3. Add graph resource/pass handles and graph dump.
 
@@ -41,7 +43,6 @@ $cmake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 
 ## Known Issues
 
-- `gh` is installed but not authenticated.
 - `cmake` is not on PATH; use the Visual Studio bundled CMake path above.
 - M1 still uses direct RHI clear. M2 will move clear into Render Graph.
 
