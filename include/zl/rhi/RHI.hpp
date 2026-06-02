@@ -49,6 +49,15 @@ enum class ResourceState {
     Present
 };
 
+enum class ShaderStage {
+    Vertex,
+    Fragment
+};
+
+enum class PrimitiveTopology {
+    TriangleList
+};
+
 struct FrameContext {
     std::uint32_t frameIndex = 0;
     std::uint32_t swapchainImageIndex = 0;
@@ -59,7 +68,9 @@ class CommandList {
 public:
     virtual ~CommandList() = default;
 
+    virtual void transitionSwapchainImage(ResourceState state) = 0;
     virtual void clearSwapchainImage(float red, float green, float blue, float alpha) = 0;
+    virtual void drawTriangleToSwapchain() = 0;
 };
 
 class Device {
@@ -69,6 +80,7 @@ public:
     virtual bool beginFrame() = 0;
     virtual CommandList& commandList() = 0;
     virtual const FrameContext& frameContext() const = 0;
+    virtual ResourceState activeSwapchainImageState() const = 0;
     virtual void endFrame() = 0;
     virtual void waitIdle() = 0;
 };

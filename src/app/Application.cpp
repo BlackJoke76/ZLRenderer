@@ -1,9 +1,11 @@
 #include "zl/app/Application.hpp"
 
+#include "zl/render_graph/RenderGraph.hpp"
 #include "zl/rhi/vulkan/VulkanDevice.hpp"
 
 #include <GLFW/glfw3.h>
 
+#include <iostream>
 #include <stdexcept>
 
 namespace zl::app {
@@ -28,6 +30,7 @@ Application::~Application()
 void Application::run(std::uint32_t maxFrames)
 {
     std::uint32_t renderedFrames = 0;
+    bool graphDumped = false;
     while (!glfwWindowShouldClose(window_)) {
         glfwPollEvents();
 
@@ -40,8 +43,27 @@ void Application::run(std::uint32_t maxFrames)
             continue;
         }
 
-        auto& commandList = device_->commandList();
-        commandList.clearSwapchainImage(0.03f, 0.06f, 0.09f, 1.0f);
+        render_graph::RenderGraph graph;
+        const auto swapchain = graph.importSwapchainTexture(
+            "SwapchainImage",
+            device_->activeSwapchainImageState(),
+            rhi::ResourceState::Present);
+        graph.addPass(
+            "Triangle",
+            render_graph::PassType::Graphics,
+            [swapchain](render_graph::RenderGraph::PassBuilder& builder) {
+                builder.writeTexture(swapchain, rhi::ResourceState::RenderTarget);
+            },
+            [](rhi::CommandList& commandList, const rhi::FrameContext&) {
+                commandList.drawTriangleToSwapchain();
+            });
+
+        if (!graphDumped) {
+            std::cout << graph.dump();
+            graphDumped = true;
+        }
+
+        graph.execute(device_->commandList(), device_->frameContext());
         device_->endFrame();
 
         ++renderedFrames;

@@ -1,12 +1,14 @@
 #pragma once
 
 #include "zl/rhi/RHI.hpp"
+#include "zl/rhi/vulkan/VulkanPipelineCache.hpp"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -32,6 +34,7 @@ public:
     bool beginFrame() override;
     CommandList& commandList() override;
     const FrameContext& frameContext() const override;
+    ResourceState activeSwapchainImageState() const override;
     void endFrame() override;
     void waitIdle() override;
 
@@ -42,7 +45,9 @@ private:
     public:
         explicit VulkanCommandList(VulkanDevice& device);
 
+        void transitionSwapchainImage(ResourceState state) override;
         void clearSwapchainImage(float red, float green, float blue, float alpha) override;
+        void drawTriangleToSwapchain() override;
 
     private:
         VulkanDevice& device_;
@@ -68,6 +73,12 @@ private:
         VkFence inFlightFence = VK_NULL_HANDLE;
     };
 
+    struct ShaderModuleDesc {
+        ShaderStage stage = ShaderStage::Vertex;
+        const char* spirvFileName = nullptr;
+        const char* entryPoint = "main";
+    };
+
     static constexpr std::uint32_t framesInFlight = 2;
 
     void createInstance();
@@ -77,6 +88,10 @@ private:
     void createLogicalDevice();
     void createSwapchain();
     void createSwapchainImageViews();
+    void createSwapchainRenderPass();
+    void createSwapchainFramebuffers();
+    void createPipelineCache();
+    void createTrianglePipeline();
     void createFrameResources();
     void recreateSwapchain();
     void cleanupSwapchain();
@@ -84,6 +99,7 @@ private:
     bool validationLayersAvailable() const;
     std::vector<const char*> requiredInstanceExtensions() const;
     bool physicalDeviceSuitable(VkPhysicalDevice device) const;
+    bool physicalDeviceFeaturesSupported(VkPhysicalDevice device) const;
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
     bool deviceExtensionSupported(VkPhysicalDevice device) const;
     SwapchainSupportDetails querySwapchainSupport(VkPhysicalDevice device) const;
@@ -93,10 +109,13 @@ private:
 
     void beginActiveCommandBuffer();
     void endActiveCommandBuffer();
-    void transitionActiveSwapchainImage(VkImageLayout oldLayout, VkImageLayout newLayout);
+    void transitionActiveSwapchainImage(ResourceState newState);
 
+    GraphicsPipelineKey trianglePipelineKey(VkPipelineLayout pipelineLayout) const;
+    VkShaderModule createShaderModule(const std::vector<std::uint32_t>& code) const;
     VkCommandBuffer activeCommandBuffer() const;
     VkImage activeSwapchainImage() const;
+    VkFramebuffer activeSwapchainFramebuffer() const;
 
     GLFWwindow* window_ = nullptr;
     bool validationEnabled_ = false;
@@ -115,9 +134,15 @@ private:
     VkExtent2D swapchainExtent_{};
     std::vector<VkImage> swapchainImages_;
     std::vector<VkImageView> swapchainImageViews_;
+    std::vector<VkFramebuffer> swapchainFramebuffers_;
     std::vector<VkImageLayout> swapchainImageLayouts_;
     std::vector<VkFence> swapchainImageFences_;
     std::vector<VkSemaphore> swapchainImageRenderFinishedSemaphores_;
+
+    VkRenderPass swapchainRenderPass_ = VK_NULL_HANDLE;
+    std::unique_ptr<VulkanPipelineCache> pipelineCache_;
+    VkPipelineLayout trianglePipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline trianglePipeline_ = VK_NULL_HANDLE;
 
     std::array<FrameResources, framesInFlight> frames_{};
     std::uint32_t currentFrame_ = 0;
