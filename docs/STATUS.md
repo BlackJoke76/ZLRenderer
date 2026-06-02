@@ -11,6 +11,7 @@
 - GitHub sync is active at `https://github.com/BlackJoke76/ZLRenderer`.
 - `main` contains the bootstrap root commit.
 - `codex/bootstrap-renderer-contract` is pushed and tracks origin.
+- Draft PR [#1](https://github.com/BlackJoke76/ZLRenderer/pull/1) contains the current M2 + M3 slices.
 
 ## Last Completed
 
@@ -42,10 +43,9 @@
 
 ## Next Step
 
-1. Open or update the bootstrap draft PR.
-2. Add a small shader compiler interface or documented build-time shader compiler boundary before adding shader reflection.
-3. Decide whether the next runnable slice should introduce a second pipeline or the first resource-binding need.
-4. Generalize the swapchain-only transition hook into normal texture barriers when graph-owned textures appear.
+1. Add a small shader compiler interface or documented build-time shader compiler boundary before adding shader reflection.
+2. Decide whether the next runnable slice should introduce a second pipeline or the first resource-binding need.
+3. Generalize the swapchain-only transition hook into normal texture barriers when graph-owned textures appear.
 
 ## Build Command
 
