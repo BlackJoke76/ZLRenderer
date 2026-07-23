@@ -40,12 +40,15 @@
 - Extracted `VulkanPipelineCache` as a backend module that owns the driver cache and cached Vulkan pipelines.
 - Route triangle pipeline creation through `GraphicsPipelineKey -> VkPipeline` lookup.
 - Clear cached pipelines before swapchain-dependent pipeline layouts and render passes are destroyed.
+- Added a VSCode-openable binary semaphore submit-order example under `docs/NOTES`.
 
 ## Next Step
 
-1. Add a small shader compiler interface or documented build-time shader compiler boundary before adding shader reflection.
-2. Decide whether the next runnable slice should introduce a second pipeline or the first resource-binding need.
-3. Generalize the swapchain-only transition hook into normal texture barriers when graph-owned textures appear.
+1. Finish the M3 shader compiler boundary, then add the smallest resource-binding slice needed by a mesh/material draw.
+2. Start M4 with a minimal CPU `TaskSystem`: fixed workers, task groups, dependencies, completion handles, stable worker indices, tests, and a deterministic single-thread fallback.
+3. Make RenderScene gathering/culling and DrawList construction the first real task-system workload; keep Render Graph command recording serial in this slice.
+4. Start M5 only after DrawList produces enough recording work: compile explicit recording batches, add per-frame/per-worker/per-queue-family command pools, and record independent command buffers in parallel while keeping barriers and submission ordering centralized.
+5. Add secondary command buffers only for a measured large-pass draw workload; do not make CPU task granularity dictate GPU submission granularity.
 
 ## Build Command
 
@@ -73,6 +76,8 @@ $cmake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 - M3 currently compiles Slang at build time through CMake. A runtime `IShaderCompiler` boundary and shader reflection are not implemented yet.
 - The current `GraphicsPipelineKey` is Vulkan-internal and covers shader identity, topology, pipeline layout, render pass, color format, and subpass.
 - `VulkanPipelineCache` is intentionally single-threaded. Add immutable/mutable cache layers only when parallel command recording creates a measured synchronization need.
+- No CPU task system exists yet. M4 introduces it for DrawList preparation before M5 connects it to Vulkan command recording.
+- Parallel recording will require one externally owned command pool per recording worker, per frame-in-flight, per queue family; the current single command list cannot be shared across worker tasks.
 
 ## Important Decisions
 
@@ -84,3 +89,4 @@ $cmake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 - [0006: Start M3 With Build-Time Slang Triangle](DECISIONS/0006-build-time-slang-triangle.md)
 - [0007: Name The First Pipeline Key Without Generalizing Descriptors](DECISIONS/0007-first-pipeline-key-without-descriptors.md)
 - [0008: Extract A Single-Threaded Vulkan Pipeline Cache](DECISIONS/0008-single-threaded-vulkan-pipeline-cache.md)
+- [0009: Stage Task System Before Parallel Command Recording](DECISIONS/0009-stage-task-system-before-parallel-recording.md)

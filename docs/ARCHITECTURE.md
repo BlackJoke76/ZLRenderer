@@ -196,6 +196,71 @@ set 2: object or dynamic data
 
 Pipeline creation must not happen repeatedly in the draw hot path.
 
+## Task System And Parallel Recording Direction
+
+The CPU task system is renderer infrastructure, not part of VulkanRHI. It owns
+worker threads and CPU task dependencies, but it does not own Vulkan handles,
+resource states, barriers, or queue submissions.
+
+The first task-system use belongs in M4:
+
+```text
+RenderScene snapshot
+    -> parallel scene gathering and culling tasks
+        -> deterministic DrawList merge
+            -> RenderGraph construction and compile
+```
+
+The initial task surface should stay small:
+
+```text
+TaskSystem
+TaskGroup
+TaskHandle
+WorkerIndex
+```
+
+It needs fixed workers, task-group dependencies, completion handles, stable
+worker indices, and a deterministic single-thread fallback. It does not start
+with coroutines, work stealing, background priorities, or Vulkan-specific task
+types. A small composer-style helper may later express prepare -> record ->
+submit stages, but it remains a thin client of `TaskSystem`.
+
+Parallel command recording is a separate M5 integration step:
+
+```text
+RenderGraph compile on the controlling thread
+    -> resolve resource states, barriers, and recording batches
+        -> record independent command buffers on worker threads
+            -> order and batch command buffers on the controlling thread
+                -> submit and present through RHI
+```
+
+Vulkan recording resources follow explicit ownership:
+
+```text
+FrameResources[frame]
+    -> QueueFamilyResources[queue]
+        -> WorkerCommandPool[worker]
+            -> reusable primary and optional secondary command buffers
+```
+
+Each command pool belongs to one recording worker for one frame-in-flight and
+one queue family. A pool is reset only after the frame fence proves that its
+command buffers are no longer pending. Worker tasks never share a mutable
+`RHICommandList` or independently decide image layouts and barriers.
+
+The first parallel recording slice uses coarse, independent physical passes and
+primary command buffers. Secondary command buffers are reserved for a later
+case where one large graphics pass contains enough draw work to amortize their
+inheritance and execution overhead. CPU task granularity must not force one GPU
+queue submission per task.
+
+`VulkanPipelineCache` remains single-threaded until parallel recording creates
+a real concurrent lookup requirement. Existing pipelines should be prepared
+before recording; background pipeline compilation and immutable/mutable cache
+layers are separate future decisions.
+
 ## Long-Term Project Memory
 
 Chat context is not project memory. The durable state is:

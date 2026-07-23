@@ -461,14 +461,6 @@ bool VulkanDevice::beginFrame()
         throw std::runtime_error("Failed to acquire swapchain image.");
     }
 
-    const auto imageIndex = frameContext_.swapchainImageIndex;
-    if (swapchainImageFences_[imageIndex] != VK_NULL_HANDLE) {
-        checkVk(
-            vkWaitForFences(device_, 1, &swapchainImageFences_[imageIndex], VK_TRUE, UINT64_MAX),
-            "Failed to wait for swapchain image fence.");
-    }
-    swapchainImageFences_[imageIndex] = frame.inFlightFence;
-
     checkVk(vkResetFences(device_, 1, &frame.inFlightFence), "Failed to reset frame fence.");
     checkVk(vkResetCommandPool(device_, frame.commandPool, 0), "Failed to reset command pool.");
 
@@ -721,7 +713,6 @@ void VulkanDevice::createSwapchain()
     swapchainImageFormat_ = surfaceFormat.format;
     swapchainExtent_ = extent;
     swapchainImageLayouts_.assign(imageCount, VK_IMAGE_LAYOUT_UNDEFINED);
-    swapchainImageFences_.assign(imageCount, VK_NULL_HANDLE);
     swapchainImageRenderFinishedSemaphores_.resize(imageCount);
 
     VkSemaphoreCreateInfo semaphoreCreateInfo{};
@@ -1023,7 +1014,6 @@ void VulkanDevice::cleanupSwapchain()
     swapchainImageViews_.clear();
     swapchainImages_.clear();
     swapchainImageLayouts_.clear();
-    swapchainImageFences_.clear();
 
     for (auto semaphore : swapchainImageRenderFinishedSemaphores_) {
         vkDestroySemaphore(device_, semaphore, nullptr);

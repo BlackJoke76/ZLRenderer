@@ -136,7 +136,6 @@ private:
     std::vector<VkImageView> swapchainImageViews_;
     std::vector<VkFramebuffer> swapchainFramebuffers_;
     std::vector<VkImageLayout> swapchainImageLayouts_;
-    std::vector<VkFence> swapchainImageFences_;
     std::vector<VkSemaphore> swapchainImageRenderFinishedSemaphores_;
 
     VkRenderPass swapchainRenderPass_ = VK_NULL_HANDLE;
