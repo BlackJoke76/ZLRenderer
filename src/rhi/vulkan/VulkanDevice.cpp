@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -299,6 +300,28 @@ struct TriangleUniformData {
 
 static_assert(sizeof(TriangleUniformData) == sizeof(float) * 4);
 
+struct TriangleVertex {
+    float position[2];
+    float color[3];
+};
+
+constexpr std::array triangleVertices = {
+    TriangleVertex{
+        .position = {0.0f, -0.55f},
+        .color = {0.95f, 0.25f, 0.18f},
+    },
+    TriangleVertex{
+        .position = {0.55f, 0.55f},
+        .color = {0.18f, 0.72f, 0.34f},
+    },
+    TriangleVertex{
+        .position = {-0.55f, 0.55f},
+        .color = {0.20f, 0.45f, 0.95f},
+    },
+};
+
+static_assert(sizeof(TriangleVertex) == sizeof(float) * 5);
+
 } // namespace
 
 bool VulkanDevice::QueueFamilyIndices::complete() const
@@ -378,6 +401,13 @@ void VulkanDevice::VulkanCommandList::drawTriangleToSwapchain()
     vkCmdSetViewport(device_.activeCommandBuffer(), 0, 1, &viewport);
     vkCmdSetScissor(device_.activeCommandBuffer(), 0, 1, &scissor);
     vkCmdBindPipeline(device_.activeCommandBuffer(), VK_PIPELINE_BIND_POINT_GRAPHICS, device_.trianglePipeline_);
+    const VkBuffer vertexBuffers[] = {
+        device_.triangleVertexBuffer_.buffer,
+    };
+    constexpr VkDeviceSize vertexOffsets[] = {
+        0,
+    };
+    vkCmdBindVertexBuffers(device_.activeCommandBuffer(), 0, 1, vertexBuffers, vertexOffsets);
     const auto descriptorSet = device_.frames_[device_.currentFrame_].triangleDescriptorSet;
     vkCmdBindDescriptorSets(
         device_.activeCommandBuffer(),
@@ -418,6 +448,7 @@ VulkanDevice::VulkanDevice(const VulkanDeviceCreateInfo& createInfo)
     createPipelineCache();
     createTriangleDescriptorSetLayout();
     createTriangleDescriptorPool();
+    createTriangleVertexBuffer();
     createTrianglePipeline();
     createFrameResources();
 
@@ -439,14 +470,9 @@ VulkanDevice::~VulkanDevice()
 
     for (auto& frame : frames_) {
         if (frame.triangleUniformMapped != nullptr) {
-            vkUnmapMemory(device_, frame.triangleUniformMemory);
+            vkUnmapMemory(device_, frame.triangleUniformBuffer.memory);
         }
-        if (frame.triangleUniformBuffer != VK_NULL_HANDLE) {
-            vkDestroyBuffer(device_, frame.triangleUniformBuffer, nullptr);
-        }
-        if (frame.triangleUniformMemory != VK_NULL_HANDLE) {
-            vkFreeMemory(device_, frame.triangleUniformMemory, nullptr);
-        }
+        destroyBuffer(frame.triangleUniformBuffer);
         if (frame.inFlightFence != VK_NULL_HANDLE) {
             vkDestroyFence(device_, frame.inFlightFence, nullptr);
         }
@@ -457,6 +483,8 @@ VulkanDevice::~VulkanDevice()
             vkDestroyCommandPool(device_, frame.commandPool, nullptr);
         }
     }
+
+    destroyBuffer(triangleVertexBuffer_);
 
     if (triangleDescriptorSetLayout_ != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(device_, triangleDescriptorSetLayout_, nullptr);
@@ -676,19 +704,10 @@ void VulkanDevice::createLogicalDevice()
         queueCreateInfos.push_back(queueCreateInfo);
     }
 
-    VkPhysicalDeviceVulkan11Features vulkan11Features{};
-    vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    vulkan11Features.shaderDrawParameters = VK_TRUE;
-
-    VkPhysicalDeviceFeatures2 deviceFeatures{};
-    deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    deviceFeatures.pNext = &vulkan11Features;
-
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = static_cast<std::uint32_t>(queueCreateInfos.size());
     createInfo.pQueueCreateInfos = queueCreateInfos.data();
-    createInfo.pNext = &deviceFeatures;
     createInfo.enabledExtensionCount = static_cast<std::uint32_t>(deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
@@ -886,6 +905,161 @@ void VulkanDevice::createTriangleDescriptorPool()
         "Failed to create triangle descriptor pool.");
 }
 
+VulkanDevice::BufferAllocation VulkanDevice::createBuffer(
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VkMemoryPropertyFlags requiredProperties) const
+{
+    BufferAllocation allocation;
+
+    VkBufferCreateInfo bufferCreateInfo{};
+    bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferCreateInfo.size = size;
+    bufferCreateInfo.usage = usage;
+    bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    checkVk(vkCreateBuffer(device_, &bufferCreateInfo, nullptr, &allocation.buffer), "Failed to create Vulkan buffer.");
+
+    try {
+        VkMemoryRequirements memoryRequirements{};
+        vkGetBufferMemoryRequirements(device_, allocation.buffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo memoryAllocateInfo{};
+        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, requiredProperties);
+
+        checkVk(
+            vkAllocateMemory(device_, &memoryAllocateInfo, nullptr, &allocation.memory),
+            "Failed to allocate Vulkan buffer memory.");
+        checkVk(
+            vkBindBufferMemory(device_, allocation.buffer, allocation.memory, 0),
+            "Failed to bind Vulkan buffer memory.");
+    } catch (...) {
+        destroyBuffer(allocation);
+        throw;
+    }
+
+    return allocation;
+}
+
+void VulkanDevice::destroyBuffer(BufferAllocation& allocation) const
+{
+    if (allocation.buffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(device_, allocation.buffer, nullptr);
+        allocation.buffer = VK_NULL_HANDLE;
+    }
+    if (allocation.memory != VK_NULL_HANDLE) {
+        vkFreeMemory(device_, allocation.memory, nullptr);
+        allocation.memory = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanDevice::uploadBufferToVertexInput(VkBuffer source, VkBuffer destination, VkDeviceSize size) const
+{
+    const auto indices = findQueueFamilies(physicalDevice_);
+
+    VkCommandPoolCreateInfo poolCreateInfo{};
+    poolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolCreateInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    poolCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+
+    VkCommandPool uploadCommandPool = VK_NULL_HANDLE;
+    checkVk(vkCreateCommandPool(device_, &poolCreateInfo, nullptr, &uploadCommandPool), "Failed to create upload command pool.");
+
+    try {
+        VkCommandBufferAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocateInfo.commandPool = uploadCommandPool;
+        allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocateInfo.commandBufferCount = 1;
+
+        VkCommandBuffer uploadCommandBuffer = VK_NULL_HANDLE;
+        checkVk(
+            vkAllocateCommandBuffers(device_, &allocateInfo, &uploadCommandBuffer),
+            "Failed to allocate upload command buffer.");
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        checkVk(vkBeginCommandBuffer(uploadCommandBuffer, &beginInfo), "Failed to begin upload command buffer.");
+
+        VkBufferCopy copyRegion{};
+        copyRegion.size = size;
+        vkCmdCopyBuffer(uploadCommandBuffer, source, destination, 1, &copyRegion);
+
+        VkBufferMemoryBarrier vertexInputBarrier{};
+        vertexInputBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        vertexInputBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        vertexInputBarrier.dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+        vertexInputBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        vertexInputBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        vertexInputBarrier.buffer = destination;
+        vertexInputBarrier.offset = 0;
+        vertexInputBarrier.size = size;
+
+        vkCmdPipelineBarrier(
+            uploadCommandBuffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+            0,
+            0,
+            nullptr,
+            1,
+            &vertexInputBarrier,
+            0,
+            nullptr);
+
+        checkVk(vkEndCommandBuffer(uploadCommandBuffer), "Failed to end upload command buffer.");
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &uploadCommandBuffer;
+        checkVk(vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE), "Failed to submit upload command buffer.");
+        checkVk(vkQueueWaitIdle(graphicsQueue_), "Failed to wait for triangle vertex upload.");
+    } catch (...) {
+        vkDestroyCommandPool(device_, uploadCommandPool, nullptr);
+        throw;
+    }
+
+    vkDestroyCommandPool(device_, uploadCommandPool, nullptr);
+}
+
+void VulkanDevice::createTriangleVertexBuffer()
+{
+    const auto bufferSize = static_cast<VkDeviceSize>(sizeof(triangleVertices));
+    auto stagingBuffer = createBuffer(
+        bufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    void* mappedData = nullptr;
+    try {
+        checkVk(
+            vkMapMemory(device_, stagingBuffer.memory, 0, bufferSize, 0, &mappedData),
+            "Failed to map triangle vertex staging buffer.");
+        std::memcpy(mappedData, triangleVertices.data(), sizeof(triangleVertices));
+        vkUnmapMemory(device_, stagingBuffer.memory);
+        mappedData = nullptr;
+
+        triangleVertexBuffer_ = createBuffer(
+            bufferSize,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        uploadBufferToVertexInput(stagingBuffer.buffer, triangleVertexBuffer_.buffer, bufferSize);
+    } catch (...) {
+        if (mappedData != nullptr) {
+            vkUnmapMemory(device_, stagingBuffer.memory);
+        }
+        destroyBuffer(triangleVertexBuffer_);
+        destroyBuffer(stagingBuffer);
+        throw;
+    }
+
+    destroyBuffer(stagingBuffer);
+}
+
 void VulkanDevice::createTrianglePipeline()
 {
     VkPipelineLayoutCreateInfo layoutCreateInfo{};
@@ -938,8 +1112,32 @@ void VulkanDevice::createTrianglePipeline()
         fragmentStage,
     };
 
+    VkVertexInputBindingDescription vertexBinding{};
+    vertexBinding.binding = 0;
+    vertexBinding.stride = sizeof(TriangleVertex);
+    vertexBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    const std::array vertexAttributes = {
+        VkVertexInputAttributeDescription{
+            .location = 0,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(TriangleVertex, position),
+        },
+        VkVertexInputAttributeDescription{
+            .location = 1,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(TriangleVertex, color),
+        },
+    };
+
     VkPipelineVertexInputStateCreateInfo vertexInput{};
     vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInput.vertexBindingDescriptionCount = 1;
+    vertexInput.pVertexBindingDescriptions = &vertexBinding;
+    vertexInput.vertexAttributeDescriptionCount = static_cast<std::uint32_t>(vertexAttributes.size());
+    vertexInput.pVertexAttributeDescriptions = vertexAttributes.data();
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -1043,36 +1241,14 @@ void VulkanDevice::createFrameResources()
 
         checkVk(vkCreateFence(device_, &fenceCreateInfo, nullptr, &frame.inFlightFence), "Failed to create frame fence.");
 
-        VkBufferCreateInfo bufferCreateInfo{};
-        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferCreateInfo.size = sizeof(TriangleUniformData);
-        bufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        checkVk(
-            vkCreateBuffer(device_, &bufferCreateInfo, nullptr, &frame.triangleUniformBuffer),
-            "Failed to create triangle uniform buffer.");
-
-        VkMemoryRequirements memoryRequirements{};
-        vkGetBufferMemoryRequirements(device_, frame.triangleUniformBuffer, &memoryRequirements);
-
-        VkMemoryAllocateInfo memoryAllocateInfo{};
-        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        memoryAllocateInfo.allocationSize = memoryRequirements.size;
-        memoryAllocateInfo.memoryTypeIndex = findMemoryType(
-            memoryRequirements.memoryTypeBits,
+        frame.triangleUniformBuffer = createBuffer(
+            sizeof(TriangleUniformData),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        checkVk(
-            vkAllocateMemory(device_, &memoryAllocateInfo, nullptr, &frame.triangleUniformMemory),
-            "Failed to allocate triangle uniform buffer memory.");
-        checkVk(
-            vkBindBufferMemory(device_, frame.triangleUniformBuffer, frame.triangleUniformMemory, 0),
-            "Failed to bind triangle uniform buffer memory.");
         checkVk(
             vkMapMemory(
                 device_,
-                frame.triangleUniformMemory,
+                frame.triangleUniformBuffer.memory,
                 0,
                 sizeof(TriangleUniformData),
                 0,
@@ -1099,7 +1275,7 @@ void VulkanDevice::createFrameResources()
         frame.triangleDescriptorSet = descriptorSets[i];
 
         VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = frame.triangleUniformBuffer;
+        bufferInfo.buffer = frame.triangleUniformBuffer.buffer;
         bufferInfo.range = sizeof(TriangleUniformData);
 
         VkWriteDescriptorSet write{};
@@ -1213,7 +1389,6 @@ bool VulkanDevice::physicalDeviceSuitable(VkPhysicalDevice device) const
 {
     const auto indices = findQueueFamilies(device);
     const auto extensionsSupported = deviceExtensionSupported(device);
-    const auto featuresSupported = physicalDeviceFeaturesSupported(device);
 
     bool swapchainAdequate = false;
     if (extensionsSupported) {
@@ -1221,21 +1396,7 @@ bool VulkanDevice::physicalDeviceSuitable(VkPhysicalDevice device) const
         swapchainAdequate = !support.formats.empty() && !support.presentModes.empty();
     }
 
-    return indices.complete() && extensionsSupported && featuresSupported && swapchainAdequate;
-}
-
-bool VulkanDevice::physicalDeviceFeaturesSupported(VkPhysicalDevice device) const
-{
-    VkPhysicalDeviceVulkan11Features vulkan11Features{};
-    vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-
-    VkPhysicalDeviceFeatures2 features{};
-    features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features.pNext = &vulkan11Features;
-
-    vkGetPhysicalDeviceFeatures2(device, &features);
-
-    return vulkan11Features.shaderDrawParameters == VK_TRUE;
+    return indices.complete() && extensionsSupported && swapchainAdequate;
 }
 
 VulkanDevice::QueueFamilyIndices VulkanDevice::findQueueFamilies(VkPhysicalDevice device) const

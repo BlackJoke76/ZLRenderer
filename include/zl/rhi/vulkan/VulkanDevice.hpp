@@ -66,13 +66,17 @@ private:
         std::vector<VkPresentModeKHR> presentModes;
     };
 
+    struct BufferAllocation {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+    };
+
     struct FrameResources {
         VkCommandPool commandPool = VK_NULL_HANDLE;
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
         VkFence inFlightFence = VK_NULL_HANDLE;
-        VkBuffer triangleUniformBuffer = VK_NULL_HANDLE;
-        VkDeviceMemory triangleUniformMemory = VK_NULL_HANDLE;
+        BufferAllocation triangleUniformBuffer;
         void* triangleUniformMapped = nullptr;
         VkDescriptorSet triangleDescriptorSet = VK_NULL_HANDLE;
     };
@@ -97,6 +101,7 @@ private:
     void createPipelineCache();
     void createTriangleDescriptorSetLayout();
     void createTriangleDescriptorPool();
+    void createTriangleVertexBuffer();
     void createTrianglePipeline();
     void createFrameResources();
     void recreateSwapchain();
@@ -105,7 +110,6 @@ private:
     bool validationLayersAvailable() const;
     std::vector<const char*> requiredInstanceExtensions() const;
     bool physicalDeviceSuitable(VkPhysicalDevice device) const;
-    bool physicalDeviceFeaturesSupported(VkPhysicalDevice device) const;
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
     bool deviceExtensionSupported(VkPhysicalDevice device) const;
     SwapchainSupportDetails querySwapchainSupport(VkPhysicalDevice device) const;
@@ -113,6 +117,12 @@ private:
     VkPresentModeKHR choosePresentMode(const std::vector<VkPresentModeKHR>& presentModes) const;
     VkExtent2D chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
     std::uint32_t findMemoryType(std::uint32_t typeFilter, VkMemoryPropertyFlags requiredProperties) const;
+    BufferAllocation createBuffer(
+        VkDeviceSize size,
+        VkBufferUsageFlags usage,
+        VkMemoryPropertyFlags requiredProperties) const;
+    void destroyBuffer(BufferAllocation& allocation) const;
+    void uploadBufferToVertexInput(VkBuffer source, VkBuffer destination, VkDeviceSize size) const;
 
     void beginActiveCommandBuffer();
     void endActiveCommandBuffer();
@@ -152,6 +162,7 @@ private:
     VkDescriptorPool triangleDescriptorPool_ = VK_NULL_HANDLE;
     VkPipelineLayout trianglePipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline trianglePipeline_ = VK_NULL_HANDLE;
+    BufferAllocation triangleVertexBuffer_;
 
     std::array<FrameResources, framesInFlight> frames_{};
     std::uint32_t currentFrame_ = 0;

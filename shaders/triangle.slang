@@ -3,6 +3,11 @@ struct VertexOutput {
     float3 color : COLOR0;
 };
 
+struct VertexInput {
+    float2 position : POSITION0;
+    float3 color : COLOR0;
+};
+
 struct TriangleUniformData {
     float4 tint;
 };
@@ -11,23 +16,11 @@ struct TriangleUniformData {
 ConstantBuffer<TriangleUniformData> triangleUniforms;
 
 [shader("vertex")]
-VertexOutput vertexMain(uint vertexId : SV_VertexID)
+VertexOutput vertexMain(VertexInput input)
 {
-    float2 positions[3] = {
-        float2(0.0, -0.55),
-        float2(0.55, 0.55),
-        float2(-0.55, 0.55),
-    };
-
-    float3 colors[3] = {
-        float3(0.95, 0.25, 0.18),
-        float3(0.18, 0.72, 0.34),
-        float3(0.20, 0.45, 0.95),
-    };
-
     VertexOutput output;
-    output.position = float4(positions[vertexId], 0.0, 1.0);
-    output.color = colors[vertexId];
+    output.position = float4(input.position, 0.0, 1.0);
+    output.color = input.color;
     return output;
 }
 
