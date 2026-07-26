@@ -3,6 +3,13 @@ struct VertexOutput {
     float3 color : COLOR0;
 };
 
+struct TriangleUniformData {
+    float4 tint;
+};
+
+[[vk::binding(0, 0)]]
+ConstantBuffer<TriangleUniformData> triangleUniforms;
+
 [shader("vertex")]
 VertexOutput vertexMain(uint vertexId : SV_VertexID)
 {
@@ -27,5 +34,5 @@ VertexOutput vertexMain(uint vertexId : SV_VertexID)
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target
 {
-    return float4(input.color, 1.0);
+    return float4(input.color * triangleUniforms.tint.rgb, triangleUniforms.tint.a);
 }

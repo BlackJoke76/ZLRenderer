@@ -71,6 +71,10 @@ private:
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
         VkSemaphore imageAvailableSemaphore = VK_NULL_HANDLE;
         VkFence inFlightFence = VK_NULL_HANDLE;
+        VkBuffer triangleUniformBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory triangleUniformMemory = VK_NULL_HANDLE;
+        void* triangleUniformMapped = nullptr;
+        VkDescriptorSet triangleDescriptorSet = VK_NULL_HANDLE;
     };
 
     struct ShaderModuleDesc {
@@ -91,6 +95,8 @@ private:
     void createSwapchainRenderPass();
     void createSwapchainFramebuffers();
     void createPipelineCache();
+    void createTriangleDescriptorSetLayout();
+    void createTriangleDescriptorPool();
     void createTrianglePipeline();
     void createFrameResources();
     void recreateSwapchain();
@@ -106,10 +112,12 @@ private:
     VkSurfaceFormatKHR chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats) const;
     VkPresentModeKHR choosePresentMode(const std::vector<VkPresentModeKHR>& presentModes) const;
     VkExtent2D chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) const;
+    std::uint32_t findMemoryType(std::uint32_t typeFilter, VkMemoryPropertyFlags requiredProperties) const;
 
     void beginActiveCommandBuffer();
     void endActiveCommandBuffer();
     void transitionActiveSwapchainImage(ResourceState newState);
+    void updateTriangleUniformBuffer(FrameResources& frame);
 
     GraphicsPipelineKey trianglePipelineKey(VkPipelineLayout pipelineLayout) const;
     VkShaderModule createShaderModule(const std::vector<std::uint32_t>& code) const;
@@ -140,6 +148,8 @@ private:
 
     VkRenderPass swapchainRenderPass_ = VK_NULL_HANDLE;
     std::unique_ptr<VulkanPipelineCache> pipelineCache_;
+    VkDescriptorSetLayout triangleDescriptorSetLayout_ = VK_NULL_HANDLE;
+    VkDescriptorPool triangleDescriptorPool_ = VK_NULL_HANDLE;
     VkPipelineLayout trianglePipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline trianglePipeline_ = VK_NULL_HANDLE;
 

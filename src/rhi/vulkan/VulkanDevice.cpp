@@ -288,6 +288,17 @@ private:
     VkPipelineLayout layout_ = VK_NULL_HANDLE;
 };
 
+struct TriangleUniformData {
+    float tint[4] = {
+        1.0f,
+        0.82f,
+        0.58f,
+        1.0f,
+    };
+};
+
+static_assert(sizeof(TriangleUniformData) == sizeof(float) * 4);
+
 } // namespace
 
 bool VulkanDevice::QueueFamilyIndices::complete() const
@@ -367,6 +378,16 @@ void VulkanDevice::VulkanCommandList::drawTriangleToSwapchain()
     vkCmdSetViewport(device_.activeCommandBuffer(), 0, 1, &viewport);
     vkCmdSetScissor(device_.activeCommandBuffer(), 0, 1, &scissor);
     vkCmdBindPipeline(device_.activeCommandBuffer(), VK_PIPELINE_BIND_POINT_GRAPHICS, device_.trianglePipeline_);
+    const auto descriptorSet = device_.frames_[device_.currentFrame_].triangleDescriptorSet;
+    vkCmdBindDescriptorSets(
+        device_.activeCommandBuffer(),
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        device_.trianglePipelineLayout_,
+        0,
+        1,
+        &descriptorSet,
+        0,
+        nullptr);
     vkCmdDraw(device_.activeCommandBuffer(), 3, 1, 0, 0);
 
     vkCmdEndRenderPass(device_.activeCommandBuffer());
@@ -395,6 +416,8 @@ VulkanDevice::VulkanDevice(const VulkanDeviceCreateInfo& createInfo)
     createSwapchainRenderPass();
     createSwapchainFramebuffers();
     createPipelineCache();
+    createTriangleDescriptorSetLayout();
+    createTriangleDescriptorPool();
     createTrianglePipeline();
     createFrameResources();
 
@@ -410,7 +433,20 @@ VulkanDevice::~VulkanDevice()
     cleanupSwapchain();
     pipelineCache_.reset();
 
+    if (triangleDescriptorPool_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device_, triangleDescriptorPool_, nullptr);
+    }
+
     for (auto& frame : frames_) {
+        if (frame.triangleUniformMapped != nullptr) {
+            vkUnmapMemory(device_, frame.triangleUniformMemory);
+        }
+        if (frame.triangleUniformBuffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(device_, frame.triangleUniformBuffer, nullptr);
+        }
+        if (frame.triangleUniformMemory != VK_NULL_HANDLE) {
+            vkFreeMemory(device_, frame.triangleUniformMemory, nullptr);
+        }
         if (frame.inFlightFence != VK_NULL_HANDLE) {
             vkDestroyFence(device_, frame.inFlightFence, nullptr);
         }
@@ -420,6 +456,10 @@ VulkanDevice::~VulkanDevice()
         if (frame.commandPool != VK_NULL_HANDLE) {
             vkDestroyCommandPool(device_, frame.commandPool, nullptr);
         }
+    }
+
+    if (triangleDescriptorSetLayout_ != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device_, triangleDescriptorSetLayout_, nullptr);
     }
 
     if (device_ != VK_NULL_HANDLE) {
@@ -463,6 +503,7 @@ bool VulkanDevice::beginFrame()
 
     checkVk(vkResetFences(device_, 1, &frame.inFlightFence), "Failed to reset frame fence.");
     checkVk(vkResetCommandPool(device_, frame.commandPool, 0), "Failed to reset command pool.");
+    updateTriangleUniformBuffer(frame);
 
     frameContext_.frameIndex = currentFrame_;
     beginActiveCommandBuffer();
@@ -810,10 +851,47 @@ void VulkanDevice::createPipelineCache()
     pipelineCache_ = std::make_unique<VulkanPipelineCache>(device_);
 }
 
+void VulkanDevice::createTriangleDescriptorSetLayout()
+{
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    binding.descriptorCount = 1;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    createInfo.bindingCount = 1;
+    createInfo.pBindings = &binding;
+
+    checkVk(
+        vkCreateDescriptorSetLayout(device_, &createInfo, nullptr, &triangleDescriptorSetLayout_),
+        "Failed to create triangle descriptor set layout.");
+}
+
+void VulkanDevice::createTriangleDescriptorPool()
+{
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = framesInFlight;
+
+    VkDescriptorPoolCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    createInfo.poolSizeCount = 1;
+    createInfo.pPoolSizes = &poolSize;
+    createInfo.maxSets = framesInFlight;
+
+    checkVk(
+        vkCreateDescriptorPool(device_, &createInfo, nullptr, &triangleDescriptorPool_),
+        "Failed to create triangle descriptor pool.");
+}
+
 void VulkanDevice::createTrianglePipeline()
 {
     VkPipelineLayoutCreateInfo layoutCreateInfo{};
     layoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutCreateInfo.setLayoutCount = 1;
+    layoutCreateInfo.pSetLayouts = &triangleDescriptorSetLayout_;
     VkPipelineLayout pipelineLayout = VK_NULL_HANDLE;
     checkVk(
         vkCreatePipelineLayout(device_, &layoutCreateInfo, nullptr, &pipelineLayout),
@@ -964,6 +1042,76 @@ void VulkanDevice::createFrameResources()
         fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
         checkVk(vkCreateFence(device_, &fenceCreateInfo, nullptr, &frame.inFlightFence), "Failed to create frame fence.");
+
+        VkBufferCreateInfo bufferCreateInfo{};
+        bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferCreateInfo.size = sizeof(TriangleUniformData);
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        bufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        checkVk(
+            vkCreateBuffer(device_, &bufferCreateInfo, nullptr, &frame.triangleUniformBuffer),
+            "Failed to create triangle uniform buffer.");
+
+        VkMemoryRequirements memoryRequirements{};
+        vkGetBufferMemoryRequirements(device_, frame.triangleUniformBuffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo memoryAllocateInfo{};
+        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = findMemoryType(
+            memoryRequirements.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        checkVk(
+            vkAllocateMemory(device_, &memoryAllocateInfo, nullptr, &frame.triangleUniformMemory),
+            "Failed to allocate triangle uniform buffer memory.");
+        checkVk(
+            vkBindBufferMemory(device_, frame.triangleUniformBuffer, frame.triangleUniformMemory, 0),
+            "Failed to bind triangle uniform buffer memory.");
+        checkVk(
+            vkMapMemory(
+                device_,
+                frame.triangleUniformMemory,
+                0,
+                sizeof(TriangleUniformData),
+                0,
+                &frame.triangleUniformMapped),
+            "Failed to map triangle uniform buffer memory.");
+    }
+
+    std::array<VkDescriptorSetLayout, framesInFlight> setLayouts{};
+    setLayouts.fill(triangleDescriptorSetLayout_);
+
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptorSetAllocateInfo.descriptorPool = triangleDescriptorPool_;
+    descriptorSetAllocateInfo.descriptorSetCount = framesInFlight;
+    descriptorSetAllocateInfo.pSetLayouts = setLayouts.data();
+
+    std::array<VkDescriptorSet, framesInFlight> descriptorSets{};
+    checkVk(
+        vkAllocateDescriptorSets(device_, &descriptorSetAllocateInfo, descriptorSets.data()),
+        "Failed to allocate triangle descriptor sets.");
+
+    for (std::size_t i = 0; i < frames_.size(); ++i) {
+        auto& frame = frames_[i];
+        frame.triangleDescriptorSet = descriptorSets[i];
+
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = frame.triangleUniformBuffer;
+        bufferInfo.range = sizeof(TriangleUniformData);
+
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = frame.triangleDescriptorSet;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo = &bufferInfo;
+
+        vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+        updateTriangleUniformBuffer(frame);
     }
 }
 
@@ -1203,6 +1351,25 @@ VkExtent2D VulkanDevice::chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& c
     return actualExtent;
 }
 
+std::uint32_t VulkanDevice::findMemoryType(
+    std::uint32_t typeFilter,
+    VkMemoryPropertyFlags requiredProperties) const
+{
+    VkPhysicalDeviceMemoryProperties memoryProperties{};
+    vkGetPhysicalDeviceMemoryProperties(physicalDevice_, &memoryProperties);
+
+    for (std::uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
+        const bool typeSupported = (typeFilter & (1U << i)) != 0;
+        const bool propertiesSupported =
+            (memoryProperties.memoryTypes[i].propertyFlags & requiredProperties) == requiredProperties;
+        if (typeSupported && propertiesSupported) {
+            return i;
+        }
+    }
+
+    throw std::runtime_error("No compatible memory type for triangle uniform buffer.");
+}
+
 void VulkanDevice::beginActiveCommandBuffer()
 {
     VkCommandBufferBeginInfo beginInfo{};
@@ -1260,6 +1427,12 @@ void VulkanDevice::transitionActiveSwapchainImage(ResourceState newState)
         &barrier);
 
     swapchainImageLayouts_[imageIndex] = newLayout;
+}
+
+void VulkanDevice::updateTriangleUniformBuffer(FrameResources& frame)
+{
+    const TriangleUniformData uniformData{};
+    std::memcpy(frame.triangleUniformMapped, &uniformData, sizeof(uniformData));
 }
 
 GraphicsPipelineKey VulkanDevice::trianglePipelineKey(VkPipelineLayout pipelineLayout) const
