@@ -1,5 +1,6 @@
 #pragma once
 
+#include "zl/rhi/CompiledShaderLibrary.hpp"
 #include "zl/rhi/RHI.hpp"
 #include "zl/rhi/vulkan/VulkanPipelineCache.hpp"
 
@@ -79,12 +80,6 @@ private:
         BufferAllocation triangleUniformBuffer;
         void* triangleUniformMapped = nullptr;
         VkDescriptorSet triangleDescriptorSet = VK_NULL_HANDLE;
-    };
-
-    struct ShaderModuleDesc {
-        ShaderStage stage = ShaderStage::Vertex;
-        const char* spirvFileName = nullptr;
-        const char* entryPoint = "main";
     };
 
     static constexpr std::uint32_t framesInFlight = 2;
@@ -169,6 +164,7 @@ private:
     FrameContext frameContext_{};
     bool frameActive_ = false;
 
+    CompiledShaderLibrary compiledShaderLibrary_;
     VulkanCommandList commandList_;
 };
 

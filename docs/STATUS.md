@@ -6,7 +6,7 @@
 - M0 project skeleton is implemented.
 - M1 RHI + frame loop + swapchain clear code is implemented.
 - M2 Render Graph clear, compile-validation, and swapchain transition execution slices are implemented.
-- M3 Slang triangle, first uniform-buffer descriptor, and device-local vertex-buffer slices are implemented.
+- M3 Slang triangle, build-time shader compiler boundary, first uniform-buffer descriptor, and device-local vertex-buffer slices are implemented.
 - The renderer currently targets Windows, VS 2022 Community, MSVC x64, Vulkan SDK, GLFW, and Dear ImGui.
 - GitHub sync is active at `https://github.com/BlackJoke76/ZLRenderer`.
 - `main` contains the bootstrap root commit.
@@ -46,12 +46,15 @@
 - Route triangle pipeline creation through `GraphicsPipelineKey -> VkPipeline` lookup.
 - Clear cached pipelines before swapchain-dependent pipeline layouts and render passes are destroyed.
 - Added a VSCode-openable binary semaphore submit-order example under `docs/NOTES`.
+- Centralized build-time Slang compilation in `zl_compile_slang_shader`.
+- Added backend-neutral `CompiledShaderLibrary` loading with focused success and failure tests.
+- Removed SPIR-V filesystem parsing from `VulkanDevice`; Vulkan now consumes compiled shader records during cached pipeline creation.
 
 ## Next Step
 
-1. Finish the M3 shader compiler boundary, then add an index-buffer slice only when the first DrawList caller needs indexed geometry.
-2. Start M4 with a minimal CPU `TaskSystem`: fixed workers, task groups, dependencies, completion handles, stable worker indices, tests, and a deterministic single-thread fallback.
-3. Make RenderScene gathering/culling and DrawList construction the first real task-system workload; keep Render Graph command recording serial in this slice.
+1. Start M4 with a minimal CPU `TaskSystem`: fixed workers, task groups, dependencies, completion handles, stable worker indices, tests, and a deterministic single-thread fallback.
+2. Make RenderScene gathering/culling and DrawList construction the first real task-system workload; keep Render Graph command recording serial in this slice.
+3. Add an index-buffer slice only when the first DrawList caller needs indexed geometry.
 4. Start M5 only after DrawList produces enough recording work: compile explicit recording batches, add per-frame/per-worker/per-queue-family command pools, and record independent command buffers in parallel while keeping barriers and submission ordering centralized.
 5. Add secondary command buffers only for a measured large-pass draw workload; do not make CPU task granularity dictate GPU submission granularity.
 
@@ -75,6 +78,7 @@ $cmake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 - Passed: current Debug code linked as `zl_renderer_verify.exe` and ran `--frames 3` with Render Graph validation and no Vulkan validation output.
 - Passed: current Debug build and `zl_renderer.exe --frames 3` after moving triangle data into the device-local vertex buffer.
 - Passed: current vertex SPIR-V module with `spirv-val`; position and color inputs use Locations 0 and 1, matching the Vulkan vertex attributes.
+- Passed: current Debug build, both CTest targets, `zl_renderer.exe --frames 3`, and both SPIR-V modules after extracting `CompiledShaderLibrary`.
 - Note: Vulkan loader prints a duplicate Epic overlay layer warning; no app validation errors remain in the frame runs.
 
 ## Known Issues
@@ -82,7 +86,7 @@ $cmake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 - `cmake` is not on PATH; use the Visual Studio bundled CMake path above.
 - Render Graph execution is currently linear and only emits runtime transitions for imported swapchain textures.
 - The submit wait stage now matches the graphics triangle path. Future mixed transfer/graphics graph execution should derive it from the first real wait consumer.
-- M3 currently compiles Slang at build time through CMake. A runtime `IShaderCompiler` boundary and shader reflection are not implemented yet, so the Vulkan descriptor layout manually mirrors `triangle.slang`.
+- M3 compiles Slang at build time and loads artifacts through `CompiledShaderLibrary`. Runtime compilation remains deferred until hot reload or editor iteration has a caller; shader reflection is not implemented, so the Vulkan descriptor layout manually mirrors `triangle.slang`.
 - The first uniform descriptor is deliberately triangle-specific. A general RHI descriptor API, material binding model, dynamic offsets, and per-draw descriptor updates are not implemented yet.
 - The first vertex buffer is deliberately triangle-specific. There is no RHI buffer API, mesh object, index buffer, or streaming upload queue yet.
 - The static vertex upload waits for the graphics queue during device initialization. Runtime streaming must use a frame-owned upload path instead.
@@ -104,3 +108,4 @@ $cmake = "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\Co
 - [0009: Stage Task System Before Parallel Command Recording](DECISIONS/0009-stage-task-system-before-parallel-recording.md)
 - [0010: Use Frame-Local Uniform Descriptor Sets First](DECISIONS/0010-frame-local-uniform-descriptor-sets.md)
 - [0011: Upload The First Vertex Buffer To Device-Local Memory](DECISIONS/0011-first-device-local-vertex-buffer.md)
+- [0012: Separate Build-Time Compilation From Shader Loading](DECISIONS/0012-separate-build-time-compilation-from-shader-loading.md)

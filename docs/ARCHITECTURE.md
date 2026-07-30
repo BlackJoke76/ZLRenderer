@@ -124,9 +124,15 @@ M3 starts with a build-time Slang triangle:
 
 ```text
 CMake
-    -> slangc shaders/triangle.slang
+    -> zl_compile_slang_shader
+        -> slangc shaders/triangle.slang
         -> build/shaders/triangle.vert.spv
         -> build/shaders/triangle.frag.spv
+
+Vulkan device setup
+    -> CompiledShaderLibrary loads SPIR-V artifacts
+    -> VulkanDevice creates temporary VkShaderModule objects
+    -> VulkanPipelineCache creates or reuses VkPipeline
 
 Application frame
     -> import active SwapchainImage
@@ -135,15 +141,18 @@ Application frame
     -> RHICommandList.drawTriangleToSwapchain
         -> begin swapchain render pass
         -> bind cached triangle graphics pipeline
+        -> bind frame-local uniform descriptor set
+        -> bind device-local triangle vertex buffer
         -> vkCmdDraw(3)
         -> end render pass
     -> graph transitions SwapchainImage to Present
 ```
 
-The triangle uses `SV_VertexID` in Slang and does not use vertex buffers,
-descriptors, push constants, or material state. `VulkanDevice` enables
-`shaderDrawParameters` because Slang emits the SPIR-V `DrawParameters`
-capability for this built-in.
+The triangle now reads position and color from a device-local vertex buffer and
+reads transform/color data from a frame-local uniform descriptor at set 0,
+binding 0. The first buffer and descriptor paths remain triangle-specific so
+their frame ownership and synchronization stay visible before a general
+resource-binding abstraction is introduced.
 
 The first pipeline cache is `VulkanPipelineCache`, a small Vulkan-backend
 module. It owns the driver `VkPipelineCache` and a
@@ -159,23 +168,24 @@ coordination machinery without removing a current bottleneck.
 
 Slang is the shader language.
 
-M3 introduces these concepts in small slices:
+The implemented build-time path is:
 
 ```text
-IShaderCompiler
-SlangcShaderCompiler
-ShaderModule
-ShaderReflection placeholder
-PipelineLayout
-PipelineKey
-PipelineCache
-BindGroupLayout
-BindGroup
+Slang source + entry point
+    -> zl_compile_slang_shader
+    -> SPIR-V artifact
+    -> CompiledShaderLibrary
+    -> VkShaderModule
+    -> GraphicsPipelineKey
+    -> VulkanPipelineCache
 ```
 
 Current M3 status:
 
-- build-time Slang compilation exists through CMake and `slangc`;
+- build-time Slang compilation is centralized in the CMake
+  `zl_compile_slang_shader` function;
+- `CompiledShaderLibrary` loads stage, entry-point, and SPIR-V data without a
+  Vulkan dependency;
 - a first `ShaderModule` concept exists as Vulkan shader module creation inside
   `VulkanDevice`, with temporary shader modules cleaned up by RAII;
 - a first pipeline cache exists as the Vulkan-backend `VulkanPipelineCache`
@@ -183,8 +193,10 @@ Current M3 status:
 - a first Vulkan-internal `GraphicsPipelineKey` exists for the triangle
   pipeline's shader identity, topology, pipeline layout, render pass, color
   format, and subpass;
-- runtime `IShaderCompiler`, shader reflection, persistent pipeline cache data,
-  and bind groups are still pending.
+- runtime shader compilation is intentionally deferred until hot reload or an
+  editor supplies a caller;
+- shader reflection, persistent pipeline cache data, and general bind groups
+  are still pending.
 
 Descriptor/binding convention:
 

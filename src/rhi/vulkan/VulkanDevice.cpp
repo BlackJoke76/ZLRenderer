@@ -5,8 +5,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <set>
 #include <stdexcept>
@@ -87,33 +85,6 @@ void checkVk(VkResult result, const char* message)
     if (result != VK_SUCCESS) {
         throw std::runtime_error(message);
     }
-}
-
-std::vector<std::uint32_t> readSpirvFile(const std::filesystem::path& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open SPIR-V file: " + path.string());
-    }
-
-    const auto fileSize = static_cast<std::streamoff>(file.tellg());
-    if (fileSize < 0 || fileSize % 4 != 0) {
-        throw std::runtime_error("SPIR-V file size is invalid: " + path.string());
-    }
-
-    std::vector<std::uint32_t> code(static_cast<std::size_t>(fileSize) / sizeof(std::uint32_t));
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(code.data()), static_cast<std::streamsize>(fileSize));
-    if (!file) {
-        throw std::runtime_error("Failed to read SPIR-V file: " + path.string());
-    }
-
-    return code;
-}
-
-std::filesystem::path shaderPath(const char* fileName)
-{
-    return std::filesystem::path{ZL_SHADER_DIR} / fileName;
 }
 
 VkImageLayout imageLayoutForResourceState(ResourceState state)
@@ -426,6 +397,7 @@ void VulkanDevice::VulkanCommandList::drawTriangleToSwapchain()
 VulkanDevice::VulkanDevice(const VulkanDeviceCreateInfo& createInfo)
     : window_(createInfo.window)
     , validationEnabled_(createInfo.enableValidation)
+    , compiledShaderLibrary_(ZL_SHADER_DIR)
     , commandList_(*this)
 {
     if (window_ == nullptr) {
@@ -1078,34 +1050,34 @@ void VulkanDevice::createTrianglePipeline()
     }
 
     const std::array shaderDescs = {
-        ShaderModuleDesc{
+        CompiledShaderDesc{
             .stage = ShaderStage::Vertex,
-            .spirvFileName = key.vertexShader.c_str(),
+            .fileName = key.vertexShader,
             .entryPoint = "main",
         },
-        ShaderModuleDesc{
+        CompiledShaderDesc{
             .stage = ShaderStage::Fragment,
-            .spirvFileName = key.fragmentShader.c_str(),
+            .fileName = key.fragmentShader,
             .entryPoint = "main",
         },
     };
 
-    const auto vertexShader = readSpirvFile(shaderPath(shaderDescs[0].spirvFileName));
-    const auto fragmentShader = readSpirvFile(shaderPath(shaderDescs[1].spirvFileName));
-    const ScopedShaderModule vertexShaderModule(device_, createShaderModule(vertexShader));
-    const ScopedShaderModule fragmentShaderModule(device_, createShaderModule(fragmentShader));
+    const auto vertexShader = compiledShaderLibrary_.load(shaderDescs[0]);
+    const auto fragmentShader = compiledShaderLibrary_.load(shaderDescs[1]);
+    const ScopedShaderModule vertexShaderModule(device_, createShaderModule(vertexShader.spirv));
+    const ScopedShaderModule fragmentShaderModule(device_, createShaderModule(fragmentShader.spirv));
 
     VkPipelineShaderStageCreateInfo vertexStage{};
     vertexStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertexStage.stage = shaderStageFlag(shaderDescs[0].stage);
+    vertexStage.stage = shaderStageFlag(vertexShader.stage);
     vertexStage.module = vertexShaderModule.get();
-    vertexStage.pName = shaderDescs[0].entryPoint;
+    vertexStage.pName = vertexShader.entryPoint.c_str();
 
     VkPipelineShaderStageCreateInfo fragmentStage{};
     fragmentStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragmentStage.stage = shaderStageFlag(shaderDescs[1].stage);
+    fragmentStage.stage = shaderStageFlag(fragmentShader.stage);
     fragmentStage.module = fragmentShaderModule.get();
-    fragmentStage.pName = shaderDescs[1].entryPoint;
+    fragmentStage.pName = fragmentShader.entryPoint.c_str();
 
     const std::array shaderStages = {
         vertexStage,

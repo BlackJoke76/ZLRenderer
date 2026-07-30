@@ -38,7 +38,8 @@ Success signal: clear is produced by Render Graph, not direct application code.
 
 ## M3: Slang Triangle And Pipeline Cache
 
-- Add `IShaderCompiler` and `SlangcShaderCompiler`.
+- Add a build-time Slang compiler boundary and a compiled-shader library.
+- Add a runtime `IShaderCompiler` only when hot reload or editor iteration needs it.
 - Add `ShaderModule`, `PipelineLayout`, `PipelineKey`, and `PipelineCache`.
 - Draw a triangle through Render Graph.
 
