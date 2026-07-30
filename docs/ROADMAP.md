@@ -38,31 +38,57 @@ Success signal: clear is produced by Render Graph, not direct application code.
 
 ## M3: Slang Triangle And Pipeline Cache
 
-- Add `IShaderCompiler` and `SlangcShaderCompiler`.
+- Add a build-time Slang compiler boundary and a compiled-shader library.
+- Add a runtime `IShaderCompiler` only when hot reload or editor iteration needs it.
 - Add `ShaderModule`, `PipelineLayout`, `PipelineKey`, and `PipelineCache`.
 - Draw a triangle through Render Graph.
 
 Success signal: Slang compiles to SPIR-V and the triangle pass reuses cached
 pipeline state.
 
-## M4: RenderScene, Mesh, Material, And DrawList
+## M4: Task System, RenderScene, And DrawList
 
+- Add a minimal CPU `TaskSystem` with fixed workers, task groups, dependencies,
+  completion handles, and stable worker indices.
 - Add `RenderScene`, camera/view, mesh instance, material instance, light stub,
   and draw list.
-- Keep first culling pass as no-op if needed, but preserve the boundary.
+- Use the task system first for scene gathering, culling, and DrawList building.
+- Keep the first culling implementation simple, but preserve the parallel work
+  boundary and a deterministic single-thread fallback.
 - Feed Render Graph passes from DrawList.
 
-Success signal: the code shows world -> scene -> draw list -> graph -> RHI.
+Success signal: the code shows world -> scene -> parallel DrawList preparation
+-> graph -> RHI, with task dependencies covered by tests.
 
-## M5: ImGui Debug, Graph Dump, And Profiling
+## M5: Parallel Command Recording
+
+- Extend compiled Render Graph output with explicit recording batches derived
+  from pass/resource dependencies.
+- Keep resource-state resolution, barrier placement, command-buffer ordering,
+  queue submission, and presentation centralized.
+- Add one command pool per recording worker, per frame-in-flight, per queue
+  family; reset pools only after that frame has completed.
+- Record sufficiently large independent physical passes in parallel primary
+  command buffers and submit compatible buffers in coarse batches.
+- Add secondary command buffers only when one large graphics pass has enough
+  draw work to justify splitting it across workers.
+- Measure serial and parallel CPU recording time before making parallel
+  recording the default path.
+
+Success signal: at least two independent non-trivial recording jobs execute on
+different workers, Vulkan validation remains clean, command-buffer submission
+follows the compiled graph order, and profiling demonstrates useful CPU work.
+
+## M6: ImGui Debug, Graph Dump, And Profiling
 
 - Add ImGui debug overlay.
-- Show frame context, draw list, Render Graph passes, and resources.
+- Show frame context, worker/recording timing, draw list, Render Graph passes,
+  recording batches, and resources.
 - Add RHI debug names, GPU marker scopes, and initial CPU pass timing.
 
 Success signal: RenderDoc and ImGui both show useful renderer structure.
 
-## M6: GAMES202 Pass Chains
+## M7: GAMES202 Pass Chains
 
 - Map each assignment into pass chains such as shadow, environment/precompute,
   screen-space GI/SSR, PBR/high-quality shading, and ray tracing/denoising.
@@ -70,7 +96,7 @@ Success signal: RenderDoc and ImGui both show useful renderer structure.
 Success signal: each assignment has a pass/resource diagram and can be toggled
 from debug UI.
 
-## M7: Compute, Mesh Shader, Ray Tracing, And AI Passes
+## M8: Compute, Mesh Shader, Ray Tracing, And AI Passes
 
 - Add compute, mesh shader, ray tracing, and AI/external pass support through
   Render Graph + RHI.
